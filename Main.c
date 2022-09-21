@@ -2,12 +2,15 @@
 #include "Window.h"
 #include "InternalVulkan.h"
 #include "File.h"
+#include "Timer.h"
 
 int main(int argc, char *argv[])
 {
 	//mat4 rot;
 	//glm_mat4_identity(rot);
 	//glm_mat4_print(rot, stdout);
+
+	Timer_Start();
 
 	struct CreateWindowParams params = { .dimensions = { 1920, 1080 }, .title = "Hello, World!" };
 
