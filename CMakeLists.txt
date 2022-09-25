@@ -9,9 +9,10 @@ find_package(Vulkan REQUIRED)
 
 add_subdirectory(external)
 add_subdirectory(shaders)
+add_subdirectory(textures)
 
 add_executable(OhNoNo Main.c Window.c Window.h InternalVulkan.c InternalVulkan.h Utilities.h File.c File.h Timer.c Timer.h)
 
 target_link_libraries(OhNoNo PUBLIC Vulkan::Vulkan SDL2::SDL2 SDL2::SDL2main)
 
-add_dependencies(OhNoNo Shaders)
+add_dependencies(OhNoNo Shaders Images)

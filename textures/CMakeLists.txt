@@ -1,0 +1,13 @@
+file(GLOB_RECURSE IMAGE_FILES "*.jpg")
+
+find_program(POWERSHELL_PATH NAMES powershell)
+
+#TODO I DONT KNOW WHAT I DID BUT IT WORKS
+foreach(IMAGE ${IMAGE_FILES})
+    get_filename_component(FILE_NAME ${IMAGE} NAME)
+    set(IMAGE_FILE "${FILE_NAME}")
+    add_custom_command(OUTPUT ${IMAGE_FILE} COMMAND ${POWERSHELL_PATH} cp -Path "${CMAKE_CURRENT_SOURCE_DIR}/${IMAGE_FILE}" -Destination "${CMAKE_CURRENT_BINARY_DIR}/${IMAGE_FILE}" DEPENDS ${IMAGE})
+    list(APPEND LIST_IMAGE_FILES ${IMAGE_FILE})
+endforeach()
+
+add_custom_target(Images DEPENDS ${LIST_IMAGE_FILES})
