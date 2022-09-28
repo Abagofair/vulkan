@@ -816,7 +816,7 @@ void CreateGraphicsPipeline()
 
 	struct VkVertexInputBindingDescription bindingDescription = GetVertexBindingDescription();
 
-	struct VkVertexInputAttributeDescription *attributeDescription = GetAttributeDescriptions();
+	const struct VkVertexInputAttributeDescription *attributeDescription = GetAttributeDescriptions();
 
 	VkPipelineVertexInputStateCreateInfo vertexInputInfo = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,

@@ -1,0 +1,16 @@
+{
+  "textures": [
+    {
+      "name": "æøåTEXTURE_1",
+      "path": "cwd/assets/textures/image.jpg",
+      "generateMipmaps": true
+    }
+  ],
+  "shaders": [
+    {
+      "name": "SHADER_FRAG",
+      "path": "cwd/assets/shaders/shader.frag",
+      "type": "fragment"
+    }
+  ]
+}
