@@ -14,10 +14,10 @@ add_subdirectory(shaders)
 add_subdirectory(textures)
 add_subdirectory(assets)
 
-add_executable(AssetCreator AssetCreator.c File.c File.h)
+add_executable(AssetCreator AssetCreator.c File.c File.h AssetStructures.h)
 target_link_libraries(AssetCreator argtable3::argtable3 cjson)
 target_include_directories(AssetCreator PRIVATE external/argtable3)
 
-add_executable(OhNoNo Main.c Window.c Window.h InternalVulkan.c InternalVulkan.h Utilities.h File.c File.h Timer.c Timer.h)
+add_executable(OhNoNo Main.c Window.c Window.h InternalVulkan.c InternalVulkan.h Utilities.h File.c File.h Timer.c Timer.h AssetStructures.h AssetManager.c AssetManager.h)
 target_link_libraries(OhNoNo PUBLIC Vulkan::Vulkan SDL2::SDL2 SDL2::SDL2main)
 add_dependencies(OhNoNo Shaders Images)
