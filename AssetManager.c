@@ -4,15 +4,12 @@
 
 #include "AssetManager.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 
 static struct AssetTexture **s_AssetTextures = NULL;
 static uint32_t s_AssetTextureCount = 0;
 
-void LoadTextures(FILE *assetFile);
 static void DestroyTextures();
-
 static void Destroy();
 
 void LoadTextures(FILE *assetFile)
