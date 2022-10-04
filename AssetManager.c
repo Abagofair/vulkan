@@ -9,9 +9,6 @@
 static struct AssetTexture **s_AssetTextures = NULL;
 static uint32_t s_AssetTextureCount = 0;
 
-static void DestroyTextures();
-static void Destroy();
-
 void LoadTextures(FILE *assetFile)
 {
 	if (s_AssetTextureCount > 0 || s_AssetTextures != NULL)
