@@ -3,6 +3,7 @@
 #include "InternalVulkan.h"
 #include "File.h"
 #include "Timer.h"
+#include "AssetManager.h"
 
 int main(int argc, char *argv[])
 {
@@ -15,6 +16,9 @@ int main(int argc, char *argv[])
 	struct CreateWindowParams params = { .dimensions = { 1920, 1080 }, .title = "Hello, World!" };
 
 	struct Window *window = CreateWindow(&params);
+
+	FILE *f = fopen("test.ass", "rb");
+	LoadTextures(f);
 
 	CreateVulkanInstance(window);
 

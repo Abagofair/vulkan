@@ -1,7 +1,7 @@
 {
   "textures": [
     {
-      "name": "æøåTEXTURE_1",
+      "name": "texture1",
       "path": "C:\\repos\\OhNoNo\\cmake-build-debug\\assets\\textures\\image.jpg",
       "generateMipmaps": true
     }

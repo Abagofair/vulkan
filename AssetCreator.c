@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <math.h>
 
 #include <argtable3.h>
 #include <cjson/cJSON.h>
@@ -10,11 +11,12 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "external/stb/stb_image.h"
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "external/stb/stb_image_write.h"
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#include "external/stb/stb_image_resize.h"
 
 #include "File.h"
 #include "AssetStructures.h"
+#include "Utilities.h"
 
 #define ABSOLUTE_PATH_SIZE 256
 
@@ -43,18 +45,18 @@ struct ManifestShader
 
 struct Assets
 {
-	struct ManifestTexture *textures;
+	struct ManifestTexture **textures;
 	uint32_t textureCount;
 
-	struct Shader *shaders;
+	struct Shader **shaders;
 	uint32_t shaderCount;
 };
 
-struct ManifestTexture *ReadTextures(cJSON *textureArray, uint32_t *readCount);
-void DestroyTextures(struct ManifestTexture *manifestTextures, uint32_t count);
+struct ManifestTexture **ReadTextures(cJSON *textureArray, uint32_t *readCount);
+void DestroyTextures(struct ManifestTexture **manifestTextures, uint32_t count);
 
-struct AssetTexture *CreateAssetTextures(struct ManifestTexture *manifestTextures, uint32_t manifestTextureCount);
-void DestroyAssetTextures(struct AssetTexture *assetTextures, uint32_t count);
+struct AssetTexture **CreateAssetTextures(struct ManifestTexture **manifestTextures, uint32_t manifestTextureCount);
+void DestroyAssetTextures(struct AssetTexture **assetTextures, uint32_t count);
 
 struct ManifestShader *ReadShaders(cJSON *shaderArray);
 
@@ -164,7 +166,7 @@ exit:
 	return exitcode;
 }
 
-struct ManifestTexture *ReadTextures(cJSON *textureArray, uint32_t *readCount)
+struct ManifestTexture **ReadTextures(cJSON *textureArray, uint32_t *readCount)
 {
 	uint32_t textureCount = cJSON_GetArraySize(textureArray);
 	if (textureCount <= 0)
@@ -173,7 +175,7 @@ struct ManifestTexture *ReadTextures(cJSON *textureArray, uint32_t *readCount)
 		return NULL;
 	}
 
-	struct ManifestTexture *manifestTextures = malloc(textureCount * sizeof(struct ManifestTexture));
+	struct ManifestTexture **manifestTextures = malloc(textureCount * sizeof(struct ManifestTexture*));
 	if (manifestTextures == NULL)
 	{
 		fprintf(stderr, "Could not allocate struct ManifestTexture *manifestTextures\n");
@@ -184,25 +186,25 @@ struct ManifestTexture *ReadTextures(cJSON *textureArray, uint32_t *readCount)
 	*readCount = 0;
 	cJSON_ArrayForEach(texture, textureArray)
 	{
-		struct ManifestTexture manifestTexture;
+		struct ManifestTexture *manifestTexture = malloc(sizeof(struct ManifestTexture));
 
 		cJSON *textureNameItem = cJSON_GetObjectItem(texture, "name");
 		if (cJSON_IsString(textureNameItem))
 		{
-			manifestTexture.name = textureNameItem->valuestring;
+			manifestTexture->name = textureNameItem->valuestring;
 		}
 
 		cJSON *texturePathItem = cJSON_GetObjectItem(texture, "path");
 		if (cJSON_IsString(texturePathItem))
 		{
-			manifestTexture.path = texturePathItem->valuestring;
+			manifestTexture->path = texturePathItem->valuestring;
 		}
 
 		cJSON *textureMipmapItem = cJSON_GetObjectItem(texture, "generateMipmaps");
-		manifestTexture.generateMipMaps = false;
+		manifestTexture->generateMipMaps = false;
 		if (cJSON_IsBool(textureMipmapItem))
 		{
-			manifestTexture.generateMipMaps = textureMipmapItem->valueint;
+			manifestTexture->generateMipMaps = textureMipmapItem->valueint;
 		}
 
 		manifestTextures[(*readCount)++] = manifestTexture;
@@ -213,7 +215,7 @@ struct ManifestTexture *ReadTextures(cJSON *textureArray, uint32_t *readCount)
 	return manifestTextures;
 }
 
-struct AssetTexture *CreateAssetTextures(struct ManifestTexture *manifestTextures, uint32_t manifestTextureCount)
+struct AssetTexture **CreateAssetTextures(struct ManifestTexture **manifestTextures, uint32_t manifestTextureCount)
 {
 	if (manifestTextureCount <= 0)
 	{
@@ -221,7 +223,7 @@ struct AssetTexture *CreateAssetTextures(struct ManifestTexture *manifestTexture
 		return NULL;
 	}
 
-	struct AssetTexture *assetTextures = malloc(manifestTextureCount * sizeof(struct AssetTexture));
+	struct AssetTexture **assetTextures = malloc(manifestTextureCount * sizeof(struct AssetTexture*));
 	if (assetTextures == NULL)
 	{
 		fprintf(stderr, "Could not allocate struct AssetTexture *s_AssetTextures\n");
@@ -230,20 +232,79 @@ struct AssetTexture *CreateAssetTextures(struct ManifestTexture *manifestTexture
 
 	for (int i = 0; i < manifestTextureCount; ++i)
 	{
-		struct ManifestTexture manifestTexture = manifestTextures[i];
-		struct AssetTexture assetTexture;
-		assetTexture.buffer = stbi_load(manifestTexture.path, &assetTexture.width, &assetTexture.height, &assetTexture.channels, STBI_rgb_alpha);
-		assetTexture.channels = 4;
-		if (assetTexture.buffer == NULL)
+		struct ManifestTexture *manifestTexture = manifestTextures[i];
+		struct AssetTexture *assetTexture = malloc(sizeof(struct AssetTexture));
+		unsigned char* stbiBuffer = stbi_load(manifestTexture->path, &assetTexture->width, &assetTexture->height, &assetTexture->channels, STBI_rgb_alpha);
+		assetTexture->channels = 4;
+		assetTexture->name = manifestTexture->name;
+		assetTexture->mipmap = manifestTexture->generateMipMaps;
+		assetTexture->bufferSize = assetTexture->channels * assetTexture->width * assetTexture->height;
+		assetTexture->mipmapCount = 0;
+
+		if (assetTexture->width != assetTexture->height || !IsPowerOfTwo(assetTexture->width))
 		{
-			fprintf(stderr, "Could not read ManifestTexture %s at path: %s\n", manifestTexture.name, manifestTexture.path);
-			fprintf(stderr, "stbi_failure_reason: %s\n", stbi_failure_reason());
+			fprintf(stderr, "Only images with equal width and height that is a power of 2 is currently supported\n");
+			stbi_image_free(assetTexture->buffer);
+			//todo: free asset and manifest textures
 			abort();
 		}
 
-		assetTexture.name = manifestTexture.name;
-		assetTexture.mipmap = manifestTexture.generateMipMaps;
-		assetTexture.size = assetTexture.channels * assetTexture.width * assetTexture.height;
+		if (assetTexture->mipmap)
+		{
+			assetTexture->mipmapCount = (uint32_t)log2(assetTexture->width);
+			uint32_t maxMipmapBufferSize = (assetTexture->bufferSize / 3) + 1;
+			uint32_t bufferSize = maxMipmapBufferSize + assetTexture->bufferSize;
+			unsigned char* buffer = malloc(bufferSize);
+			int32_t w = assetTexture->width;
+			int32_t h = assetTexture->height;
+			int32_t w2 = w / 2;
+			int32_t h2 = h / 2;
+
+			uint32_t prevSize = 0;
+
+			memcpy(buffer, stbiBuffer, assetTexture->bufferSize);
+			stbi_image_free(stbiBuffer);
+
+			for (uint32_t j = 0; j < assetTexture->mipmapCount; ++j)
+			{
+				uint32_t resizedImageSize = w2 * h2 * assetTexture->channels;
+				stbir_resize_uint8(
+					&buffer[prevSize],
+					w,
+					h,
+					0,
+					&buffer[assetTexture->bufferSize],
+					w2,
+					h2,
+					0,
+					assetTexture->channels);
+
+				prevSize = assetTexture->bufferSize;
+				assetTexture->bufferSize += resizedImageSize;
+
+				w = w2;
+				h = h2;
+				w2 /= 2;
+				h2 /= 2;
+			}
+
+			assetTexture->buffer = malloc(assetTexture->bufferSize);
+			memcpy(assetTexture->buffer, buffer, assetTexture->bufferSize);
+			free(buffer);
+		}
+		else
+		{
+			assetTexture->buffer = malloc(assetTexture->bufferSize);
+			memcpy(assetTexture->buffer, stbiBuffer, assetTexture->bufferSize);
+			stbi_image_free(stbiBuffer);
+		}
+
+		if (assetTexture->buffer == NULL)
+		{
+			fprintf(stderr, "Could not read ManifestTexture %s at path: %s\n", manifestTexture->name, manifestTexture->path);
+			fprintf(stderr, "stbi_failure_reason: %s\n", stbi_failure_reason());
+			abort();
+		}
 
 		assetTextures[i] = assetTexture;
 	}
@@ -251,18 +312,25 @@ struct AssetTexture *CreateAssetTextures(struct ManifestTexture *manifestTexture
 	return assetTextures;
 }
 
-void DestroyTextures(struct ManifestTexture *manifestTextures, uint32_t count)
-{
-	free(manifestTextures);
-}
-
-void DestroyAssetTextures(struct AssetTexture *assetTextures, uint32_t count)
+void DestroyTextures(struct ManifestTexture **manifestTextures, uint32_t count)
 {
 	for (int i = 0; i < count; ++i)
 	{
-		struct AssetTexture assetTexture = assetTextures[i];
-		stbi_image_free(assetTexture.buffer);
+		struct ManifestTexture *manifestTexture = manifestTextures[i];
+		free(manifestTexture);
 	}
+	free(manifestTextures);
+}
+
+void DestroyAssetTextures(struct AssetTexture **assetTextures, uint32_t count)
+{
+	for (int i = 0; i < count; ++i)
+	{
+		struct AssetTexture *assetTexture = assetTextures[i];
+		stbi_image_free(assetTexture->buffer);
+		free(assetTexture);
+	}
+	free(assetTextures);
 }
 
 void WriteAssetFile(const struct Assets *assets, const char *fileName)
@@ -270,7 +338,7 @@ void WriteAssetFile(const struct Assets *assets, const char *fileName)
 	assert(assets != NULL);
 
 	fprintf(stdout, "Creating asset textures from the read manifest textures\n");
-	struct AssetTexture *assetTextures = CreateAssetTextures(assets->textures, assets->textureCount);
+	struct AssetTexture **assetTextures = CreateAssetTextures(assets->textures, assets->textureCount);
 
 	FILE *assetFile = fopen(fileName, "wb");
 	errno_t assetFileErr = ferror(assetFile);
@@ -283,62 +351,21 @@ void WriteAssetFile(const struct Assets *assets, const char *fileName)
 	fwrite(&assets->textureCount, sizeof(uint32_t), 1, assetFile);
 	for (int i = 0; i < assets->textureCount; ++i)
 	{
-		struct AssetTexture assetTexture = assetTextures[i];
-		uint64_t len = strlen(assetTexture.name);
+		struct AssetTexture *assetTexture = assetTextures[i];
+		uint64_t len = strlen(assetTexture->name);
 		fprintf(stdout, "name length %llu\n", len);
 		fwrite(&len, sizeof(uint64_t), 1, assetFile);
-		fwrite(assetTexture.name, sizeof(char), strlen(assetTexture.name), assetFile);
-		fwrite(&assetTexture.width, sizeof(uint32_t), 1, assetFile);
-		fwrite(&assetTexture.height, sizeof(uint32_t), 1, assetFile);
-		fwrite(&assetTexture.channels, sizeof(uint32_t), 1, assetFile);
-		fwrite(&assetTexture.size, sizeof(uint64_t), 1, assetFile);
-		fwrite(&assetTexture.mipmap, sizeof(uint32_t), 1, assetFile);
-		fwrite(assetTexture.buffer, sizeof(unsigned char), assetTexture.size * sizeof(unsigned char), assetFile);
+		fwrite(assetTexture->name, sizeof(char), strlen(assetTexture->name), assetFile);
+		fwrite(&assetTexture->width, sizeof(uint32_t), 1, assetFile);
+		fwrite(&assetTexture->height, sizeof(uint32_t), 1, assetFile);
+		fwrite(&assetTexture->channels, sizeof(uint32_t), 1, assetFile);
+		fwrite(&assetTexture->mipmap, sizeof(uint32_t), 1, assetFile);
+		fwrite(&assetTexture->mipmapCount, sizeof(uint32_t), 1, assetFile);
+		fwrite(&assetTexture->bufferSize, sizeof(uint64_t), 1, assetFile);
+		fwrite(assetTexture->buffer, sizeof(unsigned char), assetTexture->bufferSize * sizeof(unsigned char), assetFile);
 	}
 
 	fclose(assetFile);
-
-	//test
-	FILE *file = fopen(fileName, "rb");
-
-	uint32_t textureCount;
-	fread(&textureCount, sizeof(uint32_t), 1, file);
-
-	for (int i = 0; i < textureCount; ++i)
-	{
-		struct AssetTexture assetTexture;
-		uint64_t nameLen;
-		fread(&nameLen, sizeof(uint64_t), 1, file);
-		assetTexture.name = malloc(nameLen * sizeof(char) + 1);
-
-		fprintf(stdout, "name length %llu\n", nameLen);
-
-		fread(assetTexture.name, sizeof(char), nameLen, assetFile);
-		assetTexture.name[nameLen] = '\0';
-
-		fread(&assetTexture.width, sizeof(uint32_t), 1, assetFile);
-		fread(&assetTexture.height, sizeof(uint32_t), 1, assetFile);
-		fread(&assetTexture.channels, sizeof(uint32_t), 1, assetFile);
-		fread(&assetTexture.size, sizeof(uint64_t), 1, assetFile);
-		fread(&assetTexture.mipmap, sizeof(uint32_t), 1, assetFile);
-
-		assetTexture.buffer = malloc(assetTexture.size * sizeof(unsigned char));
-		fread(assetTexture.buffer, sizeof(unsigned char), assetTexture.size * sizeof(unsigned char), assetFile);
-		fprintf(stdout, "name %s\n", assetTexture.name);
-		fprintf(stdout, "width %i\n", assetTexture.width);
-		fprintf(stdout, "height %i\n", assetTexture.height);
-		fprintf(stdout, "channels %i\n", assetTexture.channels);
-		fprintf(stdout, "size %llu\n", assetTexture.size);
-		fprintf(stdout, "mipmap %i\n", assetTexture.mipmap);
-
-		char fname[256];
-		fname[255] = '\0';
-		strcat_s(fname, 255, assetTexture.name);
-		strcat_s(fname, 4, ".jpg");
-		fprintf(stdout, "%s\n", fname);
-		//STBIWDEF int stbi_write_jpg(char const *filename, int x, int y, int comp, const void  *data, int quality);
-		stbi_write_jpg("from_ass_file.jpg", assetTexture.width, assetTexture.height, assetTexture.channels, assetTexture.buffer, 70);
-	}
 
 	DestroyAssetTextures(assetTextures, assets->textureCount);
 }

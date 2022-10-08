@@ -5,9 +5,22 @@
 #include "AssetManager.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 static struct AssetTexture **s_AssetTextures = NULL;
 static uint32_t s_AssetTextureCount = 0;
+
+struct AssetTexture *GetTexture(const char* name)
+{
+	for (uint32_t i = 0; i < s_AssetTextureCount; ++i)
+	{
+		struct AssetTexture *texture = s_AssetTextures[i];
+		if (strcmp(texture->name, name) == 0)
+			return texture;
+	}
+
+	return NULL;
+}
 
 void LoadTextures(FILE *assetFile)
 {
@@ -30,7 +43,7 @@ void LoadTextures(FILE *assetFile)
 		uint64_t nameLen;
 		fread(&nameLen, sizeof(uint64_t), 1, assetFile);
 		assetTexture->name = malloc(nameLen * sizeof(char) + 1);
-		if (assetTexture->name)
+		if (assetTexture->name == NULL)
 		{
 			fprintf(stderr, "Could not allocate assetTexture->name\n");
 			free(assetTexture);
@@ -43,19 +56,20 @@ void LoadTextures(FILE *assetFile)
 		fread(&assetTexture->width, sizeof(uint32_t), 1, assetFile);
 		fread(&assetTexture->height, sizeof(uint32_t), 1, assetFile);
 		fread(&assetTexture->channels, sizeof(uint32_t), 1, assetFile);
-		fread(&assetTexture->size, sizeof(uint64_t), 1, assetFile);
 		fread(&assetTexture->mipmap, sizeof(uint32_t), 1, assetFile);
+		fread(&assetTexture->mipmapCount, sizeof(uint32_t), 1, assetFile);
+		fread(&assetTexture->bufferSize, sizeof(uint64_t), 1, assetFile);
 
-		assetTexture->buffer = malloc(assetTexture->size * sizeof(unsigned char));
+		assetTexture->buffer = malloc(assetTexture->bufferSize * sizeof(unsigned char));
 		if (assetTexture->buffer == NULL)
 		{
-			fprintf(stderr, "Could not allocate assetTexture->name\n");
+			fprintf(stderr, "Could not allocate assetTexture->buffer\n");
 			free(assetTexture->name);
 			free(assetTexture);
 			continue;
 		}
 
-		fread(assetTexture->buffer, sizeof(unsigned char), assetTexture->size * sizeof(unsigned char), assetFile);
+		fread(assetTexture->buffer, sizeof(unsigned char), assetTexture->bufferSize * sizeof(unsigned char), assetFile);
 
 		s_AssetTextures[s_AssetTextureCount++] = assetTexture;
 	}

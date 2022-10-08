@@ -16,6 +16,7 @@
 #include "Utilities.h"
 #include "Window.h"
 #include "Timer.h"
+#include "AssetManager.h"
 #include "external/cglm/mat4.h"
 #include "external/cglm/affine.h"
 #include "external/cglm/clipspace/view_rh_zo.h"
@@ -73,14 +74,14 @@ static const VkVertexInputAttributeDescription *GetAttributeDescriptions()
 }
 
 static const struct Vertex vertices[] = {
-	{ .pos = { -0.5f, -0.5f, 0.0f }, .color = { 1.0f, 0.0f, 0.0f }, .texCoord = { 1.0f, 0.0f } },
+	{ .pos = { -0.5f, -0.5f, 0.0f }, .color = { 1.0f, 0.0f, 0.0f }, .texCoord = { 0.0f, 1.0f } },
 	{ .pos = { 0.5f, -0.5f, 0.0f }, .color = { 0.0f, 1.0f, 0.0f }, .texCoord = { 0.0f, 0.0f } },
-	{ .pos = { 0.5f, 0.5f, 0.0f }, .color = { 0.0f, 0.0f, 1.0f }, .texCoord = { 0.0f, 1.0f } },
+	{ .pos = { 0.5f, 0.5f, 0.0f }, .color = { 0.0f, 0.0f, 1.0f }, .texCoord = { 1.0f, 0.0f } },
 	{ .pos = { -0.5f, 0.5f, 0.0f }, .color = { 1.0f, 1.0f, 1.0f }, .texCoord = { 1.0f, 1.0f } },
 
-	{ .pos = { -0.5f, -0.5f, -0.5f }, .color = { 1.0f, 0.0f, 0.0f }, .texCoord = { 1.0f, 0.0f } },
+	{ .pos = { -0.5f, -0.5f, -0.5f }, .color = { 1.0f, 0.0f, 0.0f }, .texCoord = { 0.0f, 1.0f } },
 	{ .pos = { 0.5f, -0.5f, -0.5f }, .color = { 0.0f, 1.0f, 0.0f }, .texCoord = { 0.0f, 0.0f } },
-	{ .pos = { 0.5f, 0.5f, -0.5f }, .color = { 0.0f, 0.0f, 1.0f }, .texCoord = { 0.0f, 1.0f } },
+	{ .pos = { 0.5f, 0.5f, -0.5f }, .color = { 0.0f, 0.0f, 1.0f }, .texCoord = { 1.0f, 0.0f } },
 	{ .pos = { -0.5f, 0.5f, -0.5f }, .color = { 1.0f, 1.0f, 1.0f }, .texCoord = { 1.0f, 1.0f } }
 };
 
@@ -1876,49 +1877,95 @@ static void CreateImage(uint32_t width, uint32_t height, uint32_t mipLevel, VkFo
 
 static void CreateTextureImage()
 {
-	int texWidth, texHeight, texChannels;
-	stbi_uc *pixels = stbi_load("textures/image.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-	VkDeviceSize imageSize = texWidth * texHeight * 4;
-
-	if (pixels == NULL)
+	struct AssetTexture *texture = GetTexture("texture1");
+	if (texture == NULL)
 	{
-		printf("Could not load image\n");
+		printf("Could not find image\n");
 		abort();
 	}
 
-	mipLevels = floor(log2(max((double)texWidth, (double)texHeight))) + 1;
-
 	VkBuffer stagingBuffer;
 	VkDeviceMemory stagingBufferMemory;
-	CreateBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-		     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &stagingBuffer,
+	CreateBuffer(texture->bufferSize,
+		     VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+		     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		     &stagingBuffer,
 		     &stagingBufferMemory);
 
 	void *data;
-	vkMapMemory(vulkanDevice, stagingBufferMemory, 0, imageSize, 0, &data);
-	memcpy(data, pixels, imageSize);
+	vkMapMemory(vulkanDevice, stagingBufferMemory, 0, texture->bufferSize, 0, &data);
+	memcpy(data, texture->buffer, texture->bufferSize);
 	vkUnmapMemory(vulkanDevice, stagingBufferMemory);
 
-	stbi_image_free(pixels);
+	CreateImage(texture->width,
+		    texture->height,
+		    texture->mipmapCount,
+		    VK_FORMAT_R8G8B8A8_SRGB,
+		    VK_IMAGE_TILING_OPTIMAL,
+		    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+		    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		    &textureImage,
+		    &textureImageMemory);
 
-	CreateImage(texWidth, texHeight, mipLevels, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
-		    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-		    &textureImage, &textureImageMemory);
+	TransitionImageLayout(textureImage,
+			      VK_FORMAT_R8G8B8A8_SRGB,
+			      VK_IMAGE_LAYOUT_UNDEFINED,
+			      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			      texture->mipmapCount);
 
-	TransitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED,
-			      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mipLevels);
+	VkCommandBuffer commandBuffer = BeginSingleTimeCommands();
 
-	CopyBufferToImage(stagingBuffer, textureImage, texWidth, texHeight);
+	uint32_t regionCount = texture->mipmapCount + 1;
+	VkBufferImageCopy *regions = malloc(regionCount * sizeof(VkBufferImageCopy));
+	int w = texture->width;
+	int h = texture->height;
+	int offset = 0;
+	for (uint32_t mipLevel = 0; mipLevel < regionCount; ++mipLevel)
+	{
+		VkBufferImageCopy region = {
+			.bufferOffset = offset,
+			.bufferRowLength = 0,
+			.bufferImageHeight = 0,
+			.imageSubresource = {
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.mipLevel = mipLevel,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			},
+			.imageOffset = { 0, 0, 0 },
+			.imageExtent = { w, h, 1 }
+		};
 
-	GenerateMipmaps(textureImage, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, mipLevels);
+		regions[mipLevel] = region;
 
-	/*TransitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevels);*/
+		offset += w * h * texture->channels;
 
+		w /= 2;
+		h /= 2;
+	}
 
+	vkCmdCopyBufferToImage(commandBuffer,
+			       stagingBuffer,
+			       textureImage,
+			       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			       regionCount,
+			       regions);
+
+	EndSingleTimeCommands(commandBuffer);
+
+	mipLevels = texture->mipmapCount;
+
+	//CopyBufferToImage(stagingBuffer, textureImage, texture->width, texture->height);
+
+	//GenerateMipmaps(textureImage, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, mipLevels);
+
+	TransitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevels);
 
 	vkDestroyBuffer(vulkanDevice, stagingBuffer, NULL);
 	vkFreeMemory(vulkanDevice, stagingBufferMemory, NULL);
+
+	free(regions);
 }
 
 static void CreateTextureImageView()
