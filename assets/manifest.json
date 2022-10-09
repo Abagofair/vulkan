@@ -12,5 +12,12 @@
       "path": "C:\\repos\\OhNoNo\\cmake-build-debug\\assets\\shaders\\shader.frag",
       "type": "fragment"
     }
+  ],
+  "models": [
+    {
+      "name": "Oozey",
+      "path": "C:\\repos\\OhNoNo\\cmake-build-debug\\assets\\models\\Oozey_glb.glb",
+      "isStatic": true
+    }
   ]
 }

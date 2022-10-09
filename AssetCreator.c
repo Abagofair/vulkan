@@ -14,6 +14,9 @@
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include "external/stb/stb_image_resize.h"
 
+#define CGLTF_IMPLEMENTATION
+#include "external/cgltf/cgltf.h"
+
 #include "File.h"
 #include "AssetStructures.h"
 #include "Utilities.h"
@@ -22,6 +25,14 @@
 
 const char *manifestTextureObjectName = "textures";
 const char *manifestShadersObjectName = "shaders";
+const char *manifestModelObjectName = "models";
+
+struct ManifestModel
+{
+	char *name;
+	char *path;
+	bool isStatic;
+};
 
 //Manifest structures
 struct ManifestTexture
@@ -43,24 +54,28 @@ struct ManifestShader
 	enum ShaderType type;
 };
 
-struct Assets
+struct Manifest
 {
 	struct ManifestTexture **textures;
 	uint32_t textureCount;
 
-	struct Shader **shaders;
-	uint32_t shaderCount;
+	struct ManifestModel **models;
+	uint32_t modelCount;
 };
 
 struct ManifestTexture **ReadTextures(cJSON *textureArray, uint32_t *readCount);
 void DestroyTextures(struct ManifestTexture **manifestTextures, uint32_t count);
-
 struct AssetTexture **CreateAssetTextures(struct ManifestTexture **manifestTextures, uint32_t manifestTextureCount);
 void DestroyAssetTextures(struct AssetTexture **assetTextures, uint32_t count);
 
+struct ManifestModel **ReadModels(cJSON *modelArray, uint32_t *readCount);
+void DestroyModels(struct ManifestModel **manifestModels, uint32_t count);
+struct AssetModel **CreateAssetModels(struct ManifestModel **manifestModels, uint32_t count);
+void DestroyAssetModels(struct AssetMesh **assetModels, uint32_t count);
+
 struct ManifestShader *ReadShaders(cJSON *shaderArray);
 
-void WriteAssetFile(const struct Assets *assets, const char *fileName);
+void WriteAssetFile(const struct Manifest *manifest, const char *fileName);
 
 int main(int argc, char **argv)
 {
@@ -149,11 +164,15 @@ int main(int argc, char **argv)
 		}
 	}
 
-	struct Assets assets;
+	struct Manifest assets;
 
 	cJSON *textures = cJSON_GetObjectItemCaseSensitive(manifest, manifestTextureObjectName);
 	fprintf(stdout, "Reading manifest textures\n");
 	assets.textures = ReadTextures(textures, &assets.textureCount);
+
+	cJSON *models = cJSON_GetObjectItemCaseSensitive(manifest, manifestModelObjectName);
+	fprintf(stdout, "Reading manifest models\n");
+	assets.models = ReadModels(models, &assets.modelCount);
 
 	WriteAssetFile(&assets, "test.ass");
 
@@ -163,11 +182,200 @@ exit:
 	cJSON_Delete(manifest);
 
 	DestroyTextures(assets.textures, assets.textureCount);
+	DestroyModels(assets.models, assets.modelCount);
 	return exitcode;
+}
+
+struct ManifestModel **ReadModels(cJSON *modelArray, uint32_t *readCount)
+{
+	assert(modelArray != NULL);
+	assert(readCount != NULL);
+
+	uint32_t modelCount = cJSON_GetArraySize(modelArray);
+	if (modelCount <= 0)
+	{
+		fprintf(stdout, "Did not find any models in the \"models\" object\n");
+		return NULL;
+	}
+
+	struct ManifestModel **manifestModels = malloc(modelCount * sizeof(struct ManifestModel*));
+	if (manifestModels == NULL)
+	{
+		fprintf(stderr, "Could not malloc struct ManifestModel **manifestModels\n");
+		abort();
+	}
+
+	cJSON *model = NULL;
+	*readCount = 0;
+	cJSON_ArrayForEach(model, modelArray)
+	{
+		struct ManifestModel *manifestModel = malloc(sizeof(struct ManifestModel));
+		if (manifestModel == NULL)
+		{
+			fprintf(stderr, "Could not malloc struct ManifestModel *manifestModel\n");
+			abort();
+		}
+
+		cJSON *modelNameItem = cJSON_GetObjectItem(model, "name");
+		if (cJSON_IsString(modelNameItem))
+		{
+			manifestModel->name = modelNameItem->valuestring;
+		}
+
+		cJSON *modelPathItem = cJSON_GetObjectItem(model, "path");
+		if (cJSON_IsString(modelPathItem))
+		{
+			manifestModel->path = modelPathItem->valuestring;
+		}
+
+		cJSON *modelIsStaticItem = cJSON_GetObjectItem(model, "isStatic");
+		manifestModel->isStatic = false;
+		if (cJSON_IsBool(modelIsStaticItem))
+		{
+			manifestModel->isStatic = modelIsStaticItem->valueint;
+		}
+
+		manifestModels[(*readCount)++] = manifestModel;
+	}
+
+	fprintf(stdout, "Read %i manifest model objects\n", *readCount);
+
+	return manifestModels;
+}
+//currently assumes 1 to 1 manifestModel to mesh
+struct AssetModel **CreateAssetModels(struct ManifestModel **manifestModels, uint32_t count)
+{
+	if (count <= 0)
+	{
+		fprintf(stdout, "No manifest models, skipping creating asset models\n");
+		return NULL;
+	}
+
+	assert(manifestModels != NULL);
+
+	const uint32_t positions = 0;
+	const uint32_t normals = 1;
+	const uint32_t uvs = 2;
+
+	struct AssetModel **assetModels = malloc(count * sizeof(struct AssetModel*));
+	if (assetModels == NULL)
+	{
+		fprintf(stderr, "Could not allocate struct struct AssetModel **assetModels\n");
+		abort();
+	}
+
+	for (uint32_t i = 0; i < count; ++i)
+	{
+		struct ManifestModel *manifestModel = manifestModels[i];
+
+		fprintf(stdout, "Reading the manifest model for %s\n", manifestModel->name);
+
+		cgltf_options options = {0};
+		cgltf_data* data = NULL;
+		cgltf_result result = cgltf_parse_file(&options, manifestModel->path, &data);
+		if (result == cgltf_result_success)
+		{
+			struct AssetModel *model = malloc(sizeof(struct AssetModel));
+			if (model == NULL)
+			{
+				fprintf(stderr, "Could not allocate struct AssetModel *model\n");
+				continue;
+			}
+
+			struct AssetMesh *assetMeshes = malloc(data->meshes_count * sizeof(struct AssetMesh));
+			if (assetMeshes == NULL)
+			{
+				fprintf(stderr, "Could not allocate asset mesh - skipping\n");
+				continue;
+			}
+
+			bool buildMeshes = false;
+			for (int j = 0; j < data->meshes_count; ++j)
+			{
+				cgltf_mesh mesh = data->meshes[j];
+
+				if (mesh.primitives_count != 1)
+				{
+					fprintf(stdout, "Found more than 1 primitive - skipping mesh\n");
+					break;
+				}
+
+				cgltf_primitive primitive = mesh.primitives[0];
+
+				bool hasValidMeshBufferFormat = true;
+				for (uint32_t l = 0; l < primitive.attributes_count; ++l)
+				{
+					cgltf_attribute attribute = primitive.attributes[l];
+
+					if (strcmp(attribute.name, "POSITION") == 0 && l != positions)
+					{
+						fprintf(stdout, "POSITION index: %i\n", positions);
+						hasValidMeshBufferFormat = false;
+					}
+					else if (strcmp(attribute.name, "NORMAL") == 0 && l != normals)
+					{
+						fprintf(stdout, "NORMAL index: %i\n", normals);
+						hasValidMeshBufferFormat = false;
+					}
+					else if (strcmp(attribute.name, "TEXCOORD_0") == 0 && l != uvs)
+					{
+						fprintf(stderr, "TEXCOORD_0 was at the wrong position\n");
+						hasValidMeshBufferFormat = false;
+					}
+				}
+
+				if (hasValidMeshBufferFormat)
+				{
+					//todo find out how im supposed to submit a vertex/indexbuffer for a model/meshes in vulkan
+					struct AssetMesh currMesh = {
+						.name = "MESH",
+						.indices = primitive.indices->buffer_view->buffer->size,
+						.indexBuffer = primitive.indices->buffer_view->buffer->data,
+						.vertices = primitive.attributes->data->buffer_view->size,
+						.vertexBuffer = primitive.attributes->data->buffer_view->data
+					};
+
+					assetMeshes[j] = currMesh;
+
+					fprintf(stdout, "Created an AssetMesh for %s\n", currMesh.name);
+					buildMeshes = true;
+				}
+				else
+				{
+					fprintf(stderr, "Skipping model since the mesh data is in an unexpected format\n");
+					buildMeshes = false;
+				}
+			}
+
+			if (buildMeshes)
+			{
+				fprintf(stdout, "Build meshes - finishing asset model\n");
+				model->name = manifestModel->name;
+				model->isStatic = manifestModel->isStatic;
+				model->meshCount = data->meshes_count;
+				model->meshes = assetMeshes;
+				assetModels[i] = model;
+			}
+
+			cgltf_free(data);
+		}
+		else
+		{
+			fprintf(stdout,
+				"When creating AssetModels could not read %s at path: %s\n",
+				manifestModel->name,
+				manifestModel->path);
+		}
+	}
+
+	return assetModels;
 }
 
 struct ManifestTexture **ReadTextures(cJSON *textureArray, uint32_t *readCount)
 {
+	assert(textureArray != NULL);
+	assert(readCount != NULL);
+
 	uint32_t textureCount = cJSON_GetArraySize(textureArray);
 	if (textureCount <= 0)
 	{
@@ -178,7 +386,7 @@ struct ManifestTexture **ReadTextures(cJSON *textureArray, uint32_t *readCount)
 	struct ManifestTexture **manifestTextures = malloc(textureCount * sizeof(struct ManifestTexture*));
 	if (manifestTextures == NULL)
 	{
-		fprintf(stderr, "Could not allocate struct ManifestTexture *manifestTextures\n");
+		fprintf(stderr, "Could not allocate struct ManifestTexture **manifestTextures\n");
 		abort();
 	}
 
@@ -187,6 +395,11 @@ struct ManifestTexture **ReadTextures(cJSON *textureArray, uint32_t *readCount)
 	cJSON_ArrayForEach(texture, textureArray)
 	{
 		struct ManifestTexture *manifestTexture = malloc(sizeof(struct ManifestTexture));
+		if (manifestTexture == NULL)
+		{
+			fprintf(stderr, "Could not malloc struct ManifestTexture *manifestTexture\n");
+			abort();
+		}
 
 		cJSON *textureNameItem = cJSON_GetObjectItem(texture, "name");
 		if (cJSON_IsString(textureNameItem))
@@ -222,6 +435,8 @@ struct AssetTexture **CreateAssetTextures(struct ManifestTexture **manifestTextu
 		fprintf(stdout, "No manifest textures, skipping creating asset textures\n");
 		return NULL;
 	}
+
+	assert(manifestTextures != NULL);
 
 	struct AssetTexture **assetTextures = malloc(manifestTextureCount * sizeof(struct AssetTexture*));
 	if (assetTextures == NULL)
@@ -312,6 +527,16 @@ struct AssetTexture **CreateAssetTextures(struct ManifestTexture **manifestTextu
 	return assetTextures;
 }
 
+void DestroyModels(struct ManifestModel **manifestModels, uint32_t count)
+{
+	for (int i = 0; i < count; ++i)
+	{
+		struct ManifestModel *manifestModel = manifestModels[i];
+		free(manifestModel);
+	}
+	free(manifestModels);
+}
+
 void DestroyTextures(struct ManifestTexture **manifestTextures, uint32_t count)
 {
 	for (int i = 0; i < count; ++i)
@@ -333,12 +558,15 @@ void DestroyAssetTextures(struct AssetTexture **assetTextures, uint32_t count)
 	free(assetTextures);
 }
 
-void WriteAssetFile(const struct Assets *assets, const char *fileName)
+void WriteAssetFile(const struct Manifest *manifest, const char *fileName)
 {
-	assert(assets != NULL);
+	assert(manifest != NULL);
 
 	fprintf(stdout, "Creating asset textures from the read manifest textures\n");
-	struct AssetTexture **assetTextures = CreateAssetTextures(assets->textures, assets->textureCount);
+	struct AssetTexture **assetTextures = CreateAssetTextures(manifest->textures, manifest->textureCount);
+
+	fprintf(stdout, "Creating asset models from the read manifest textures\n");
+	struct AssetModel **assetModels = CreateAssetModels(manifest->models, manifest->modelCount);
 
 	FILE *assetFile = fopen(fileName, "wb");
 	errno_t assetFileErr = ferror(assetFile);
@@ -348,8 +576,8 @@ void WriteAssetFile(const struct Assets *assets, const char *fileName)
 		abort();
 	}
 
-	fwrite(&assets->textureCount, sizeof(uint32_t), 1, assetFile);
-	for (int i = 0; i < assets->textureCount; ++i)
+	fwrite(&manifest->textureCount, sizeof(uint32_t), 1, assetFile);
+	for (int i = 0; i < manifest->textureCount; ++i)
 	{
 		struct AssetTexture *assetTexture = assetTextures[i];
 		uint64_t len = strlen(assetTexture->name);
@@ -365,7 +593,29 @@ void WriteAssetFile(const struct Assets *assets, const char *fileName)
 		fwrite(assetTexture->buffer, sizeof(unsigned char), assetTexture->bufferSize * sizeof(unsigned char), assetFile);
 	}
 
+	for (int i = 0; i < manifest->modelCount; ++i)
+	{
+		struct AssetModel *assetModel = assetModels[i];
+		uint64_t len = strlen(assetModel->name);
+		fwrite(&len, sizeof(uint64_t), 1, assetFile);
+		fwrite(assetModel->name, sizeof(char), len, assetFile);
+		fwrite(&assetModel->isStatic, sizeof(uint32_t), 1, assetFile);
+		fwrite(&assetModel->meshCount, sizeof(uint32_t), 1, assetFile);
+
+		for (int j = 0; j < assetModel->meshCount; ++j)
+		{
+			struct AssetMesh assetMesh = assetModel->meshes[j];
+			len = strlen(assetMesh.name);
+			fwrite(&len, sizeof(uint64_t), 1, assetFile);
+			fwrite(assetMesh.name, sizeof(char), len, assetFile);
+			fwrite(&assetMesh.vertices, sizeof(uint64_t), 1, assetFile);
+			fwrite(assetMesh.vertexBuffer, sizeof(float), assetMesh.vertices * sizeof(float), assetFile);
+			fwrite(&assetMesh.indices, sizeof(uint64_t), 1, assetFile);
+			fwrite(assetMesh.indexBuffer, sizeof(uint16_t), assetMesh.indices * sizeof(uint16_t), assetFile);
+		}
+	}
+
 	fclose(assetFile);
 
-	DestroyAssetTextures(assetTextures, assets->textureCount);
+	DestroyAssetTextures(assetTextures, manifest->textureCount);
 }

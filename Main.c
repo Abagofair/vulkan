@@ -46,6 +46,7 @@ int main(int argc, char *argv[])
 
 	DestroyVulkan();
 	DestroyWindow();
+	DestroyTextures();
 
 	printf("Exiting....\n");
 
